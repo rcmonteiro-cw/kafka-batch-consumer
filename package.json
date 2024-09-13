@@ -1,0 +1,22 @@
+{
+  "name": "kafka-batch-consumer",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "start:consumer": "node dist/consumer.js",
+    "start:consumer-cluster": "node dist/consumer-cluster.js",
+    "start:producer": "node dist/producer.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "kafkajs": "^2.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.4",
+    "typescript": "^5.6.2"
+  }
+}
