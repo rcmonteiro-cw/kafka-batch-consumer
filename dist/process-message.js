@@ -7,7 +7,7 @@ process.on('message', async (message) => {
         return `Processed ${textFromMsg}`;
     });
     // simulate processing delay
-    await new Promise(res => { setTimeout(res, 1000); });
+    // await new Promise(res => { setTimeout(res,1000) });
     // Enviar resultados de volta para o processo pai
     if (process.send) {
         process.send({ results });
