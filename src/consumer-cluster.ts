@@ -1,7 +1,12 @@
-import { Kafka } from 'kafkajs';
-import { fork } from 'child_process';
+import { Kafka, Consumer, EachBatchPayload } from 'kafkajs';
+import { cpus } from 'os';
+import { fork, ChildProcess } from 'child_process';
 import path from 'path';
-import { initialize } from './cluster';
+
+const numCPUs = cpus().length;
+const maxBatchSize = 100;
+const task = path.resolve(__dirname, 'process-message.js');
+let childProcesses: ChildProcess[] = [];
 
 const kafka = new Kafka({
   clientId: 'batch-consumer',
@@ -9,47 +14,60 @@ const kafka = new Kafka({
 });
 
 const consumer = kafka.consumer({ groupId: 'batch-group' });
-const task = path.resolve(__dirname, 'process-message.js');
-const clusterSize = 10;
-const batchSize = 10;
 
-const run = async () => {
+async function runConsumer() {
   await consumer.connect();
   await consumer.subscribe({ topic: 'batch-topic', fromBeginning: true });
 
-  console.log('Consumer is ready...');
-
   await consumer.run({
-    eachBatch: async ({ batch, resolveOffset, heartbeat, isRunning, isStale }) => {
-      if (!isRunning() || isStale()) return;
+    eachBatch: async (payload: EachBatchPayload) => {
+      const { batch, resolveOffset, heartbeat, isRunning, commitOffsetsIfNecessary } = payload;
+      const messages = batch.messages;
 
-      const messages = batch.messages.slice(0, batchSize);
-      const total = messages.length
+      for (let i = 0; i < messages.length; i += maxBatchSize) {
+        if (!isRunning()) break;
 
-      console.log(`Received batch with ${total} messages`);
+        const batchSlice = messages.slice(i, i + maxBatchSize);
+        await processBatch(batchSlice);
 
-      let totalProcessed = 0;
-
-      const cp = initialize({
-        backgroundTaskFile: task,
-        clusterSize,
-        async onMessage(message: any) {
-          if (++totalProcessed !== total) {
-            return
-          }
-
-          cp.killAll();
-          process.exit();
-        }
-      })
-      for await (const data of messages) {
-        cp.getProcess().send(data.value!.toString());
+        const lastOffset = batchSlice[batchSlice.length - 1].offset;
+        resolveOffset(lastOffset);
+        await commitOffsetsIfNecessary();
+        await heartbeat();
       }
-
-      // Wait for the entire batch to finish
-      await heartbeat();
     },
   });
-};
+}
 
-run().catch(console.error);
+async function processBatch(batchSlice: any[]) {
+  console.log(`Processing batch of ${batchSlice.length} messages`);
+  
+  const batchesPerProcess = Math.ceil(batchSlice.length / numCPUs);
+  const processingPromises: Promise<void>[] = [];
+
+  for (let i = 0; i < numCPUs; i++) {
+    const start = i * batchesPerProcess;
+    const end = Math.min((i + 1) * batchesPerProcess, batchSlice.length);
+    const subBatch = batchSlice.slice(start, end);
+
+    const promise = new Promise<void>((resolve) => {
+      const child = fork(task);
+      childProcesses.push(child);
+
+      child.send({ batch: subBatch });
+
+      child.on('message', (message) => {
+        console.log(`Child process ${i} completed:`, message);
+        childProcesses = childProcesses.filter(p => p !== child);
+        resolve();
+      });
+    });
+
+    processingPromises.push(promise);
+  }
+
+  await Promise.all(processingPromises);
+  console.log('All child processes for this batch completed');
+}
+
+runConsumer().catch(console.error);
