@@ -11,12 +11,7 @@ Run producer
 npm run start:producer
 ```
 
-Run consumer using promisses for parallelism, and one child_process for each promisse
+Run consumer
 ```bash
 npm run start:consumer
-```
-
-Run consumer using cluster with child_process to execute each batch in parallel
-```bash
-npm run start:consumer-cluster
 ```
